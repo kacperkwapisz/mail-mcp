@@ -909,7 +909,9 @@ async def archive_email(
     return await asyncio.to_thread(_archive)
 
 
-@mcp.tool(description="Move an email from one folder to another. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted).")
+@mcp.tool(
+    description="Move an email from one folder to another. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def move_email(
     ctx: Context,
     account_id: str,
@@ -934,7 +936,9 @@ async def move_email(
     return await asyncio.to_thread(_move)
 
 
-@mcp.tool(description="Mark an email as read, unread, flagged, or unflagged. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted).")
+@mcp.tool(
+    description="Mark an email as read, unread, flagged, or unflagged. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def mark_email(
     ctx: Context,
     account_id: str,
@@ -973,7 +977,9 @@ async def mark_email(
     return await asyncio.to_thread(_mark)
 
 
-@mcp.tool(description="List all IMAP folders for an account. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted).")
+@mcp.tool(
+    description="List all IMAP folders for an account. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def list_folders(
     ctx: Context,
     account_id: str,
@@ -999,7 +1005,9 @@ async def list_folders(
     return await asyncio.to_thread(_list)
 
 
-@mcp.tool(description="Create a new IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted).")
+@mcp.tool(
+    description="Create a new IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def create_folder(
     ctx: Context,
     account_id: str,
@@ -1019,7 +1027,9 @@ async def create_folder(
     return await asyncio.to_thread(_create)
 
 
-@mcp.tool(description="Rename an existing IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted).")
+@mcp.tool(
+    description="Rename an existing IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def rename_folder(
     ctx: Context,
     account_id: str,
@@ -1074,7 +1084,9 @@ async def delete_folder(
     return await asyncio.to_thread(_delete)
 
 
-@mcp.tool(description="List all configured email inboxes/accounts available on this server. Call this first to discover valid account_id values — every other email tool requires account_id. account_id also accepts the account's email address (from_address, imap_username, or smtp_username). This tool performs no IMAP connections and is safe to call frequently.")
+@mcp.tool(
+    description="List all configured email inboxes/accounts available on this server. Call this first to discover valid account_id values — every other email tool requires account_id. account_id also accepts the account's email address (from_address, imap_username, or smtp_username). This tool performs no IMAP connections and is safe to call frequently."
+)
 async def list_accounts(ctx: Context) -> list[dict]:
     accounts = ctx.lifespan_context["accounts"]
     return [
@@ -1090,7 +1102,9 @@ async def list_accounts(ctx: Context) -> list[dict]:
     ]
 
 
-@mcp.tool(description="Get server name, version, webhook URL, and per-account connection status (performs a live IMAP check per account). For cheap inbox discovery without connecting, use list_accounts.")
+@mcp.tool(
+    description="Get server name, version, webhook URL, and per-account connection status (performs a live IMAP check per account). For cheap inbox discovery without connecting, use list_accounts."
+)
 async def get_server_info(ctx: Context) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     webhook_url = ctx.lifespan_context["webhook_url"]
