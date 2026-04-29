@@ -207,10 +207,23 @@ PYEOF
   fi
 fi
 
-# 4. MCP_API_KEY — generate once and persist to .env
-if [ ! -f .env ] \
+# ── Load .env early so POKE_TUNNEL is visible to the MCP_API_KEY logic below ──
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+
+# Tunnel-mode detection must happen BEFORE the MCP_API_KEY block: in tunnel
+# mode (POKE_TUNNEL=1, the default) the local server runs unauthenticated and
+# the tunnel handles auth, so we must NOT generate a key — doing so previously
+# overwrote user-supplied keys and broke working setups (issue #9).
+POKE_TUNNEL="${POKE_TUNNEL:-1}"
+
+# 4. MCP_API_KEY — generate once and persist to .env (skipped in tunnel mode)
+if [ "${POKE_TUNNEL}" != "1" ] && { [ ! -f .env ] \
    || grep -Eq '^[[:space:]]*MCP_API_KEY=your-secret-key-here' .env 2>/dev/null \
-   || ! grep -Eq '^[[:space:]]*MCP_API_KEY=.+' .env 2>/dev/null; then
+   || ! grep -Eq '^[[:space:]]*MCP_API_KEY=.+' .env 2>/dev/null; }; then
   RANDOM_KEY=$(python3 -c "
 import secrets, string
 alphabet = string.ascii_letters + string.digits
@@ -233,18 +246,13 @@ PYEOF
   fi
   echo "  ✓ MCP_API_KEY generated and saved to .env"
   echo ""
-fi
-
-# ── Load .env ─────────────────────────────────────────────────────────────────
-if [ -f .env ]; then
+  # Re-source so the freshly generated key is visible to the rest of the script
   set -a
   source .env
   set +a
 fi
 
-# ── Tunnel-mode detection ─────────────────────────────────────────────────────
-POKE_TUNNEL="${POKE_TUNNEL:-1}"
-
+# ── Tunnel-mode enforcement ───────────────────────────────────────────────────
 if [ "${POKE_TUNNEL}" != "1" ]; then
   : "${MCP_API_KEY:?MCP_API_KEY is not set — add it to .env or export it}"
 else
