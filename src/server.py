@@ -265,6 +265,15 @@ def resolve_account(accounts: list[dict], account_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# RFC 2971 IMAP ID — required by some providers (e.g. netease 163.com / 126.com / yeah.net)
+# which reject clients that don't identify themselves after login.
+_IMAP_CLIENT_ID = {
+    "name": "poke-mail",
+    "version": "1.0.0",
+    "vendor": "Poke Interactions",
+}
+
+
 def get_imap_client(account: dict) -> IMAPClient:
     port = account["imap_port"]
     use_ssl = port == 993
@@ -272,6 +281,13 @@ def get_imap_client(account: dict) -> IMAPClient:
     if not use_ssl:
         client.starttls()
     client.login(account["imap_username"], account["imap_password"])
+    # Send IMAP ID if the server supports it. Non-fatal: not all servers do,
+    # and we never want this to break an otherwise-working login.
+    try:
+        if client.has_capability("ID"):
+            client.id_(_IMAP_CLIENT_ID)
+    except Exception as e:
+        logger.debug("IMAP ID command failed for %s: %s", account.get("id"), e)
     return client
 
 
