@@ -4,7 +4,7 @@ An MCP server that bridges IMAP/SMTP email accounts to [Poke](https://poke.com).
 
 ## Features
 
-- **12 MCP tools**: search, read, send, draft, archive, move, mark, list/create/rename/delete folders, server info
+- **13 MCP tools**: list accounts, search, read, send, draft, archive, move, mark, list/create/rename/delete folders, server info
 - **Send toggle**: Disable `send_email` globally or per account — agents use `create_draft` instead
 - **IMAP IDLE watcher**: Real-time monitoring of new emails, forwarded to Poke automatically
 - **Multi-account support**: Configure multiple email accounts in a single config file
@@ -157,8 +157,11 @@ The server is mostly idle (IMAP IDLE + lightweight HTTP). Recommended limits for
 
 ## MCP Tools
 
+> **All email tools require `account_id`.** Call `list_accounts` first to discover available inboxes. `account_id` accepts either the configured `id` or the account's email address (`from_address`, `imap_username`, or `smtp_username`).
+
 | Tool | Description |
 |------|-------------|
+| `list_accounts` | List all configured inboxes (no IMAP connection — cheap discovery) |
 | `search_emails` | Search by from, to, subject, date range |
 | `read_email` | Read full email content by UID |
 | `send_email` | Send email with text/HTML, CC/BCC, reply threading (can be disabled) |
@@ -170,7 +173,11 @@ The server is mostly idle (IMAP IDLE + lightweight HTTP). Recommended limits for
 | `create_folder` | Create a new folder |
 | `rename_folder` | Rename a folder |
 | `delete_folder` | Delete a folder (protected folders blocked) |
-| `get_server_info` | Server status and account connectivity |
+| `get_server_info` | Server status and account connectivity (performs live IMAP check per account) |
+
+### Breaking change in v1.1.0
+
+`account_id` is now **required** on every per-account tool (`search_emails`, `read_email`, `send_email`, `create_draft`, `archive_email`, `move_email`, `mark_email`, `list_folders`, `create_folder`, `rename_folder`, `delete_folder`). Previously, omitting it silently fell back to the first configured account. Agents must now call `list_accounts` (or pass an email address) to specify which inbox to act on.
 
 ## Environment Variables
 
