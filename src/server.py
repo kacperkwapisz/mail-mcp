@@ -455,6 +455,55 @@ async def forward_to_poke(
     return False
 
 
+def _format_uid_list(uids: list[int], limit: int = 10) -> str:
+    if not uids:
+        return "[]"
+    shown = ", ".join(str(uid) for uid in uids[:limit])
+    if len(uids) > limit:
+        shown += f", ... (+{len(uids) - limit} more)"
+    return f"[{shown}]"
+
+
+async def _forward_uid_batch(
+    client: IMAPClient,
+    account: dict,
+    folder: str,
+    webhook_url: str,
+    api_key: str,
+    uids: list[int],
+) -> None:
+    logger.info(
+        "[%s/%s] Forwarding %d message(s) for UIDs %s",
+        account["id"],
+        folder,
+        len(uids),
+        _format_uid_list(uids),
+    )
+    raw_messages = await asyncio.to_thread(client.fetch, uids, ["RFC822"])
+    for uid in uids:
+        data = raw_messages.get(uid, {})
+        raw = data.get(b"RFC822", b"")
+        if not raw:
+            logger.debug(
+                "[%s/%s] Skipping UID %s because RFC822 payload was empty",
+                account["id"],
+                folder,
+                uid,
+            )
+            continue
+        email_data = parse_email_message(raw)
+        await forward_to_poke(email_data, account, webhook_url, api_key)
+
+    if account.get("mark_as_read", False):
+        await asyncio.to_thread(client.set_flags, uids, [b"\\Seen"])
+        logger.debug(
+            "[%s/%s] Marked UIDs %s as Seen",
+            account["id"],
+            folder,
+            _format_uid_list(uids),
+        )
+
+
 # ---------------------------------------------------------------------------
 # IDLE watcher
 # ---------------------------------------------------------------------------
@@ -470,15 +519,25 @@ async def watch_folder(
     backoff = 5
     max_backoff = 60
 
+    # Hoisted across reconnects so a transient disconnect (e.g. iCloud's
+    # unsolicited FETCH FLAGS during IDLE) doesn't re-baseline the cursor and
+    # silently drop mail that arrived during the reconnect window. Reset only
+    # on first run or when the server's UIDVALIDITY changes (which means UIDs
+    # have been reassigned and the previous cursor is meaningless).
+    last_seen_uid: Optional[int] = None
+    last_uidvalidity: Optional[int] = None
+
     while not stop_event.is_set():
         client = None
         try:
             client = await asyncio.to_thread(get_imap_client, account)
-            await asyncio.to_thread(
+            select_info = await asyncio.to_thread(
                 client.select_folder,
                 folder,
                 readonly=not account.get("mark_as_read", False),
             )
+
+            uidvalidity = select_info.get(b"UIDVALIDITY") if select_info else None
 
             # Check IDLE support
             if not client.has_capability("IDLE"):
@@ -487,19 +546,57 @@ async def watch_folder(
                     account["id"],
                     folder,
                 )
-                await _poll_folder(
-                    client, account, folder, webhook_url, api_key, stop_event
-                )
+                # Mutable cursor state — _poll_folder updates it so reconnects
+                # don't re-baseline.
+                cursor = {
+                    "last_seen_uid": last_seen_uid,
+                    "last_uidvalidity": last_uidvalidity,
+                }
+                try:
+                    await _poll_folder(
+                        client,
+                        account,
+                        folder,
+                        webhook_url,
+                        api_key,
+                        stop_event,
+                        cursor,
+                    )
+                finally:
+                    last_seen_uid = cursor["last_seen_uid"]
+                    last_uidvalidity = cursor["last_uidvalidity"]
+                # _poll_folder only returns when stop_event is set; on errors it
+                # raises and we fall through to the outer reconnect path.
                 return
 
-            # Record existing unseen UIDs so we only forward truly new ones
-            existing_unseen = set(await asyncio.to_thread(client.search, ["UNSEEN"]))
-            logger.info(
-                "[%s/%s] Watching for new emails via IDLE (%d existing unseen skipped)",
-                account["id"],
-                folder,
-                len(existing_unseen),
-            )
+            if last_seen_uid is None or uidvalidity != last_uidvalidity:
+                if last_uidvalidity is not None and uidvalidity != last_uidvalidity:
+                    logger.warning(
+                        "[%s/%s] UIDVALIDITY changed (%s → %s) — resetting cursor",
+                        account["id"],
+                        folder,
+                        last_uidvalidity,
+                        uidvalidity,
+                    )
+                mailbox_uids = await asyncio.to_thread(client.search, ["ALL"])
+                last_seen_uid = mailbox_uids[-1] if mailbox_uids else 0
+                last_uidvalidity = uidvalidity
+                logger.info(
+                    "[%s/%s] Watching for new emails via IDLE from UID %d (%d existing message(s), mark_as_read=%s)",
+                    account["id"],
+                    folder,
+                    last_seen_uid,
+                    len(mailbox_uids),
+                    account.get("mark_as_read", False),
+                )
+            else:
+                logger.info(
+                    "[%s/%s] Resumed IDLE watch from UID %d (mark_as_read=%s)",
+                    account["id"],
+                    folder,
+                    last_seen_uid,
+                    account.get("mark_as_read", False),
+                )
             backoff = 5
 
             while not stop_event.is_set():
@@ -518,25 +615,36 @@ async def watch_folder(
                     "[%s/%s] IDLE responses: %s", account["id"], folder, responses
                 )
 
-                uids = await asyncio.to_thread(client.search, ["UNSEEN"])
-                # Only forward emails that arrived after we started watching
-                new_uids = [u for u in uids if u not in existing_unseen]
+                mailbox_uids = await asyncio.to_thread(client.search, ["ALL"])
+                new_uids = [uid for uid in mailbox_uids if uid > last_seen_uid]
                 if not new_uids:
+                    logger.debug(
+                        "[%s/%s] No new UIDs above %d (mailbox latest UID %d)",
+                        account["id"],
+                        folder,
+                        last_seen_uid,
+                        mailbox_uids[-1] if mailbox_uids else last_seen_uid,
+                    )
                     continue
 
-                raw_messages = await asyncio.to_thread(
-                    client.fetch, new_uids, ["RFC822"]
+                logger.info(
+                    "[%s/%s] Found %d new UID(s) above %d: %s",
+                    account["id"],
+                    folder,
+                    len(new_uids),
+                    last_seen_uid,
+                    _format_uid_list(new_uids),
                 )
-                for uid, data in raw_messages.items():
-                    raw = data.get(b"RFC822", b"")
-                    if not raw:
-                        continue
-                    email_data = parse_email_message(raw)
-                    await forward_to_poke(email_data, account, webhook_url, api_key)
-
-                if account.get("mark_as_read", False):
-                    await asyncio.to_thread(client.set_flags, new_uids, [b"\\Seen"])
-                existing_unseen.update(new_uids)
+                await _forward_uid_batch(
+                    client, account, folder, webhook_url, api_key, new_uids
+                )
+                last_seen_uid = new_uids[-1]
+                logger.debug(
+                    "[%s/%s] Advanced UID cursor to %d",
+                    account["id"],
+                    folder,
+                    last_seen_uid,
+                )
 
         except asyncio.CancelledError:
             break
@@ -565,24 +673,68 @@ async def _poll_folder(
     webhook_url: str,
     api_key: str,
     stop_event: asyncio.Event,
+    cursor: dict,
 ):
-    """Fallback polling for servers without IDLE support. Checks every 60 seconds."""
-    logger.info("[%s/%s] Polling for new emails every 60s", account["id"], folder)
+    """Fallback polling for servers without IDLE support. Checks every 60 seconds.
+
+    `cursor` is a mutable dict with keys 'last_seen_uid' and 'last_uidvalidity'
+    shared with watch_folder so cursor state survives reconnects.
+    """
+    if cursor.get("last_seen_uid") is None:
+        mailbox_uids = await asyncio.to_thread(client.search, ["ALL"])
+        cursor["last_seen_uid"] = mailbox_uids[-1] if mailbox_uids else 0
+        logger.info(
+            "[%s/%s] Polling for new emails every 60s from UID %d (%d existing message(s), mark_as_read=%s)",
+            account["id"],
+            folder,
+            cursor["last_seen_uid"],
+            len(mailbox_uids),
+            account.get("mark_as_read", False),
+        )
+    else:
+        logger.info(
+            "[%s/%s] Resumed polling from UID %d (mark_as_read=%s)",
+            account["id"],
+            folder,
+            cursor["last_seen_uid"],
+            account.get("mark_as_read", False),
+        )
     while not stop_event.is_set():
         try:
-            uids = await asyncio.to_thread(client.search, ["UNSEEN"])
-            if uids:
-                raw_messages = await asyncio.to_thread(client.fetch, uids, ["RFC822"])
-                for uid, data in raw_messages.items():
-                    raw = data.get(b"RFC822", b"")
-                    if not raw:
-                        continue
-                    email_data = parse_email_message(raw)
-                    await forward_to_poke(email_data, account, webhook_url, api_key)
-                if account.get("mark_as_read", False):
-                    await asyncio.to_thread(client.set_flags, uids, [b"\\Seen"])
+            last_seen_uid = cursor["last_seen_uid"]
+            mailbox_uids = await asyncio.to_thread(client.search, ["ALL"])
+            new_uids = [uid for uid in mailbox_uids if uid > last_seen_uid]
+            if new_uids:
+                logger.info(
+                    "[%s/%s] Found %d new UID(s) above %d: %s",
+                    account["id"],
+                    folder,
+                    len(new_uids),
+                    last_seen_uid,
+                    _format_uid_list(new_uids),
+                )
+                await _forward_uid_batch(
+                    client, account, folder, webhook_url, api_key, new_uids
+                )
+                cursor["last_seen_uid"] = new_uids[-1]
+                logger.debug(
+                    "[%s/%s] Advanced UID cursor to %d",
+                    account["id"],
+                    folder,
+                    cursor["last_seen_uid"],
+                )
+            else:
+                logger.debug(
+                    "[%s/%s] No new UIDs above %d (mailbox latest UID %d)",
+                    account["id"],
+                    folder,
+                    last_seen_uid,
+                    mailbox_uids[-1] if mailbox_uids else last_seen_uid,
+                )
         except Exception as e:
-            logger.warning("[%s/%s] Poll error: %s", account["id"], folder, e)
+            logger.warning(
+                "[%s/%s] Poll error: %s", account["id"], folder, e
+            )
             raise  # reconnect via outer loop
         await asyncio.sleep(60)
 
