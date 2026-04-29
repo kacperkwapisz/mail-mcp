@@ -224,22 +224,39 @@ def parse_accounts(config: dict) -> list[dict]:
     return accounts
 
 
-def resolve_account(accounts: list[dict], account_id: Optional[str] = None) -> dict:
-    if not account_id:
-        return accounts[0]
+def resolve_account(accounts: list[dict], account_id: str) -> dict:
+    if not account_id or not account_id.strip():
+        raise ValueError(
+            f"account_id is required. Available accounts: {[a['id'] for a in accounts]}. "
+            f"Call list_accounts to see all inboxes."
+        )
+    needle = account_id.strip().lower()
+    # Exact id match (case-insensitive, whitespace-tolerant)
     for acc in accounts:
-        if acc["id"] == account_id:
+        if acc["id"].lower() == needle:
             return acc
-    # Fallback: match by email address (from_address, imap_username, smtp_username)
-    for acc in accounts:
-        if account_id in (
-            acc.get("from_address"),
-            acc.get("imap_username"),
-            acc.get("smtp_username"),
-        ):
-            return acc
+    # Fallback: match by email address (from_address, imap_username, smtp_username).
+    # Collect all matches so we can detect ambiguity instead of silently picking the first.
+    matches = [
+        acc
+        for acc in accounts
+        if needle
+        in {
+            (acc.get("from_address") or "").lower(),
+            (acc.get("imap_username") or "").lower(),
+            (acc.get("smtp_username") or "").lower(),
+        }
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"account_id '{account_id}' matches multiple accounts: "
+            f"{[a['id'] for a in matches]}. Pass the unique 'id' instead."
+        )
     raise ValueError(
-        f"Unknown account_id: {account_id}. Available: {[a['id'] for a in accounts]}"
+        f"Unknown account_id '{account_id}'. Available: {[a['id'] for a in accounts]}. "
+        f"Call list_accounts for full details."
     )
 
 
@@ -732,12 +749,12 @@ async def health(request):
 
 
 @mcp.tool(
-    description="Search emails by criteria. Returns a list of matching emails with metadata."
+    description="Search emails by criteria. Returns a list of matching emails with metadata. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def search_emails(
     ctx: Context,
+    account_id: str,
     folder: str = "INBOX",
-    account_id: Optional[str] = None,
     from_addr: Optional[str] = None,
     to_addr: Optional[str] = None,
     subject: Optional[str] = None,
@@ -803,13 +820,13 @@ async def search_emails(
 
 
 @mcp.tool(
-    description="Read a specific email by UID. Returns full email content including body and attachment metadata."
+    description="Read a specific email by UID. Returns full email content including body and attachment metadata. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def read_email(
     ctx: Context,
+    account_id: str,
     uid: int,
     folder: str = "INBOX",
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -829,14 +846,14 @@ async def read_email(
 
 
 @mcp.tool(
-    description="Send an email via SMTP. Supports plain text and HTML, CC/BCC, and reply threading."
+    description="Send an email via SMTP. Supports plain text and HTML, CC/BCC, and reply threading. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def send_email(
     ctx: Context,
+    account_id: str,
     to: str,
     subject: str,
     body: str,
-    account_id: Optional[str] = None,
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
     html: Optional[str] = None,
@@ -911,14 +928,14 @@ async def send_email(
 
 
 @mcp.tool(
-    description="Save an email as a draft for review before sending. The draft appears in the account's Drafts folder."
+    description="Save an email as a draft for review before sending. The draft appears in the account's Drafts folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def create_draft(
     ctx: Context,
+    account_id: str,
     to: str,
     subject: str,
     body: str,
-    account_id: Optional[str] = None,
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
     html: Optional[str] = None,
@@ -954,13 +971,13 @@ async def create_draft(
 
 
 @mcp.tool(
-    description="Archive an email by moving it to the Archive folder instead of deleting."
+    description="Archive an email by moving it to the Archive folder instead of deleting. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def archive_email(
     ctx: Context,
+    account_id: str,
     uid: int,
     folder: str = "INBOX",
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -983,13 +1000,15 @@ async def archive_email(
     return await asyncio.to_thread(_archive)
 
 
-@mcp.tool(description="Move an email from one folder to another.")
+@mcp.tool(
+    description="Move an email from one folder to another. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def move_email(
     ctx: Context,
+    account_id: str,
     uid: int,
     to_folder: str,
     from_folder: str = "INBOX",
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -1008,13 +1027,15 @@ async def move_email(
     return await asyncio.to_thread(_move)
 
 
-@mcp.tool(description="Mark an email as read, unread, flagged, or unflagged.")
+@mcp.tool(
+    description="Mark an email as read, unread, flagged, or unflagged. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def mark_email(
     ctx: Context,
+    account_id: str,
     uid: int,
     action: str,
     folder: str = "INBOX",
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -1047,10 +1068,12 @@ async def mark_email(
     return await asyncio.to_thread(_mark)
 
 
-@mcp.tool(description="List all IMAP folders for an account.")
+@mcp.tool(
+    description="List all IMAP folders for an account. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def list_folders(
     ctx: Context,
-    account_id: Optional[str] = None,
+    account_id: str,
 ) -> list[dict]:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -1073,11 +1096,13 @@ async def list_folders(
     return await asyncio.to_thread(_list)
 
 
-@mcp.tool(description="Create a new IMAP folder.")
+@mcp.tool(
+    description="Create a new IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def create_folder(
     ctx: Context,
+    account_id: str,
     name: str,
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -1093,12 +1118,14 @@ async def create_folder(
     return await asyncio.to_thread(_create)
 
 
-@mcp.tool(description="Rename an existing IMAP folder.")
+@mcp.tool(
+    description="Rename an existing IMAP folder. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
+)
 async def rename_folder(
     ctx: Context,
+    account_id: str,
     old_name: str,
     new_name: str,
-    account_id: Optional[str] = None,
 ) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     acc = resolve_account(accounts, account_id)
@@ -1115,12 +1142,12 @@ async def rename_folder(
 
 
 @mcp.tool(
-    description="Delete an IMAP folder. Refuses to delete INBOX or system folders."
+    description="Delete an IMAP folder. Refuses to delete INBOX or system folders. Requires account_id — call list_accounts to discover valid IDs (id or email address accepted)."
 )
 async def delete_folder(
     ctx: Context,
+    account_id: str,
     name: str,
-    account_id: Optional[str] = None,
 ) -> dict:
     protected = {
         "INBOX",
@@ -1148,7 +1175,27 @@ async def delete_folder(
     return await asyncio.to_thread(_delete)
 
 
-@mcp.tool(description="Get server information and account connection status.")
+@mcp.tool(
+    description="List all configured email inboxes/accounts available on this server. Call this first to discover valid account_id values — every other email tool requires account_id. account_id also accepts the account's email address (from_address, imap_username, or smtp_username). This tool performs no IMAP connections and is safe to call frequently."
+)
+async def list_accounts(ctx: Context) -> list[dict]:
+    accounts = ctx.lifespan_context["accounts"]
+    return [
+        {
+            "id": acc["id"],
+            "from_address": acc.get("from_address"),
+            "imap_username": acc.get("imap_username"),
+            "imap_host": acc.get("imap_host"),
+            "smtp_host": acc.get("smtp_host"),
+            "watch_folders": acc.get("watch_folders", []),
+        }
+        for acc in accounts
+    ]
+
+
+@mcp.tool(
+    description="Get server name, version, webhook URL, and per-account connection status (performs a live IMAP check per account). For cheap inbox discovery without connecting, use list_accounts."
+)
 async def get_server_info(ctx: Context) -> dict:
     accounts = ctx.lifespan_context["accounts"]
     webhook_url = ctx.lifespan_context["webhook_url"]
@@ -1175,7 +1222,7 @@ async def get_server_info(ctx: Context) -> dict:
 
     return {
         "server_name": "poke-mail",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "accounts": account_info,
         "webhook_url": webhook_url,
     }
