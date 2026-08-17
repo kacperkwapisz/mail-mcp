@@ -37,6 +37,14 @@ jobs:
 
       - run: go build ./...
 
+      # Build and run the actual binary, not just the packages. `go build ./...`
+      # stays green even if cmd/ is missing entirely, which is exactly how the
+      # entrypoint once got left out of a commit.
+      - name: Build and smoke-test the binary
+        run: |
+          go build -o /tmp/mail-mcp ./cmd/mail-mcp
+          /tmp/mail-mcp --version
+
       - run: go test -race -coverprofile=coverage.out ./...
 
       - name: Report coverage
@@ -50,10 +58,10 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v8 is the first release that understands a version 2 config file.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.6.2
 
   docker:
     runs-on: ubuntu-latest
