@@ -12,9 +12,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -27,6 +27,27 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      # Regression test for .gitignore itself. An unanchored "mail-mcp" rule
+      # once matched the cmd/mail-mcp/ directory, so `git add cmd` was a
+      # silent no-op and a commit shipped with no package main. check-ignore
+      # works on hypothetical paths, so this catches the rule before a file
+      # exists to be lost.
+      - name: Verify ignore rules do not swallow source
+        run: |
+          status=0
+          for path in \
+            cmd/mail-mcp/main.go \
+            internal/config/testdata/config.yml \
+            internal/mailmime/testdata/sample.out \
+            internal/tools/testdata/golden.yml
+          do
+            if git check-ignore -q "$path"; then
+              echo "::error::.gitignore would silently swallow $path"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Verify go.mod is tidy
         run: |
@@ -53,8 +74,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -67,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
