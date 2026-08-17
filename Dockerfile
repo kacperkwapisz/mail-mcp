@@ -3,6 +3,15 @@
 # ---- build ----------------------------------------------------------------
 FROM golang:1.25-alpine AS build
 
+# ca-certificates for TLS verification at runtime. Timezone data is embedded
+# in the binary instead (see the time/tzdata import), since Alpine ships no
+# /usr/share/zoneinfo to copy.
+RUN apk add --no-cache ca-certificates
+
+# An empty directory to become a writable /tmp on scratch, where
+# get_attachment writes files.
+RUN mkdir -p /emptytmp && chmod 1777 /emptytmp
+
 WORKDIR /src
 
 # Dependencies first so a source-only change reuses the module cache.
@@ -25,12 +34,10 @@ FROM scratch
 
 # TLS roots, so IMAP and SMTP certificate verification works.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Timezone data, so message dates render correctly.
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/mail-mcp /mail-mcp
 
 # Writable location for get_attachment.
-COPY --from=build --chown=65534:65534 /tmp /tmp
+COPY --from=build --chown=65534:65534 /emptytmp /tmp
 
 # nobody: nothing here needs root.
 USER 65534:65534

@@ -18,6 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the timezone database in the binary. Message Date headers carry
+	// zone names as well as numeric offsets, and the runtime image is
+	// scratch — there is no /usr/share/zoneinfo to fall back on.
+	_ "time/tzdata"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kacperkwapisz/mail-mcp/internal/config"
