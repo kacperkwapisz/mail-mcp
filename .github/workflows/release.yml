@@ -88,7 +88,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
+            # Only stable tags move :latest. A prerelease such as v1.1.0-rc1
+            # must not become what `docker pull` gives people by default.
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - uses: docker/build-push-action@v6
         with:
