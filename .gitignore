@@ -4,10 +4,12 @@ config.yml
 .env.*
 !.env.example
 
-# Build output
+# Build output.
+# These are anchored with a leading slash on purpose: an unanchored
+# "mail-mcp" would also match the cmd/mail-mcp/ source directory.
 /bin/
 /dist/
-mail-mcp
+/mail-mcp
 
 # Go
 *.test
