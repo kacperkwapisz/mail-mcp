@@ -1,43 +1,118 @@
-# poke-mail configuration
-# Copy this file to config.yml and fill in your credentials
+# mail-mcp configuration
+#
+# Copy to config.yml and fill in your credentials. This file stays on the
+# server — the agent only ever sees an account id, never a hostname it could
+# connect to or a password it could use.
+#
+#   cp config.example.yml config.yml
 
-webhook_url: "https://poke.com/api/v1/inbound/api-message"
-poke_api_key: "your-api-key-here"
+# ---------------------------------------------------------------------------
+# Global gates
+#
+# Both default to false. An agent can always read, search, organize, and save
+# drafts; sending and deleting are opt-in.
+# ---------------------------------------------------------------------------
 
-# MCP_API_KEY is set via environment variable (not in this file)
-# It secures the MCP server so only you can use it
+# Allow send_email, reply_email, and forward_email.
+# With this false, agents must use create_draft and you send it yourself.
+allow_send: false
 
-# Global send toggle — set to false to disable send_email for all accounts
-# Agents can still use create_draft. Override per account with allow_send.
-allow_send: true
+# Allow delete_email and delete_folder. Even when true, delete_email only
+# moves messages to Trash and still requires confirm: true on every call.
+allow_delete: false
 
-# Mark forwarded emails as read — set to true to mark emails as read after
-# forwarding to Poke. Defaults to false. Override per account with mark_as_read.
-mark_as_read: false
+# ---------------------------------------------------------------------------
+# Limits — bound what a single tool call can cost
+# ---------------------------------------------------------------------------
+limits:
+  # Truncate each body part to this many characters. Bodies are the main way
+  # an agent's context gets eaten.
+  max_body_chars: 50000
 
+  # Largest page search_emails will return.
+  max_search_results: 100
+
+  # Refuse to download or attach anything bigger than this.
+  max_attachment_bytes: 26214400 # 25 MiB
+
+  # Where get_attachment writes files. Defaults to the system temp directory.
+  # attachment_dir: /var/lib/mail-mcp/attachments
+
+# ---------------------------------------------------------------------------
+# Timeouts — every network operation is bounded
+# ---------------------------------------------------------------------------
+timeouts:
+  imap_connect: 30s
+  imap_command: 60s
+  smtp_connect: 30s
+  # Generous: this covers DATA transmission, and a large attachment on a slow
+  # uplink legitimately takes minutes.
+  smtp_send: 5m
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
 accounts:
-  # iCloud Mail — login is @icloud.com, send as your custom domain
-  # Generate an App-Specific Password: https://support.apple.com/en-us/102654
+  # iCloud — you log in as @icloud.com but send as your own domain.
+  # Generate an app-specific password: https://support.apple.com/en-us/102654
   - id: icloud
-    imap_host: imap.mail.me.com
-    imap_username: "you@icloud.com"
-    imap_password: "your-app-password"
-    smtp_host: smtp.mail.me.com
-    smtp_username: "you@icloud.com"
-    smtp_password: "your-app-password"
-    from_address: "you@yourdomain.com"  # Override From: header (login is @icloud.com but send as custom domain)
-    watch_folders:
-      - INBOX
-    # mark_as_read: false  # Keep emails unread after forwarding
+    imap:
+      host: imap.mail.me.com
+      port: 993
+      security: tls # tls | starttls | plain
+      username: you@icloud.com
+      password: xxxx-xxxx-xxxx-xxxx
+    smtp:
+      host: smtp.mail.me.com
+      port: 587
+      security: starttls
+      username: you@icloud.com
+      password: xxxx-xxxx-xxxx-xxxx
 
-  # Custom SMTP server — SMTP falls back to IMAP credentials if not specified
+    # Override the From header. Without this, mail goes out as the SMTP
+    # username, which is rarely what you want on a custom domain.
+    from_address: you@yourdomain.com
+    from_name: Your Name
+
+    # Per-account overrides of the global gates.
+    allow_send: true
+    # allow_delete: true
+
+  # Gmail / Google Workspace — requires an App Password with 2FA enabled.
+  # - id: gmail
+  #   imap:
+  #     host: imap.gmail.com
+  #     username: you@gmail.com
+  #     password: your-app-password
+  #   smtp:
+  #     host: smtp.gmail.com
+  #     port: 587
+  #     username: you@gmail.com
+  #     password: your-app-password
+  #   # Gmail files its own copy of sent mail, so the server skips the extra
+  #   # IMAP APPEND automatically. Set save_sent explicitly to override.
+  #   # save_sent: false
+
+  # Generic provider. SMTP inherits the IMAP host and credentials when omitted.
   # - id: work
-  #   imap_host: imap.example.com
-  #   imap_username: "you@example.com"
-  #   imap_password: "your-password"
-  #   smtp_host: smtp.example.com
-  #   smtp_port: 587
-  #   smtp_username: "you@example.com"
-  #   smtp_password: "your-password"
-  #   watch_folders:
-  #     - INBOX
+  #   imap:
+  #     host: mail.example.com
+  #     username: you@example.com
+  #     password: your-password
+  #   smtp:
+  #     host: smtp.example.com
+  #     port: 465
+  #     security: tls
+
+  # Local relay with no TLS — only for something on the same host.
+  # - id: relay
+  #   imap:
+  #     host: 127.0.0.1
+  #     port: 143
+  #     security: starttls
+  #     username: you@localhost
+  #     password: password
+  #   smtp:
+  #     host: 127.0.0.1
+  #     port: 25
+  #     security: plain

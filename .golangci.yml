@@ -1,0 +1,30 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers]
+
+  exclusions:
+    rules:
+      # Tests deliberately ignore errors on setup paths.
+      - path: _test\.go
+        linters: [errcheck, gocritic]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
