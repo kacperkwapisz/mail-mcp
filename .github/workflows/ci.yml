@@ -94,6 +94,23 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: mail-mcp:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Building a scratch image proves nothing about whether it runs. A
+      # missing cert bundle or a stray dynamic link would otherwise only
+      # surface once someone pulled it.
+      - name: Smoke-test the image
+        run: |
+          docker run --rm mail-mcp:test --version
+
+          # With no config mounted, startup must fail with a clear message
+          # rather than panicking or hanging.
+          output=$(docker run --rm mail-mcp:test 2>&1 || true)
+          echo "$output"
+          case "$output" in
+            *"read config"*) ;;
+            *) echo "::error::unexpected startup output from the image"; exit 1 ;;
+          esac
