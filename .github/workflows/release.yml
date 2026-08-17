@@ -102,3 +102,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Pull the artifact that was just published and run it, so a broken
+      # image is caught here rather than by whoever pulls it next.
+      - name: Verify the published image runs
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          docker pull "$image"
+          docker run --rm "$image" --version
