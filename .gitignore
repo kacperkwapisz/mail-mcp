@@ -1,12 +1,15 @@
-# Secrets — never commit these
+# Secrets — never commit these.
+# Deliberately unanchored: a stray config.yml in any subdirectory would hold
+# credentials too, so the broad match is the point.
 config.yml
 .env
 .env.*
 !.env.example
 
 # Build output.
-# These are anchored with a leading slash on purpose: an unanchored
-# "mail-mcp" would also match the cmd/mail-mcp/ source directory.
+# Anchored with a leading slash on purpose. An unanchored "mail-mcp" matches
+# at any depth, which once swallowed the cmd/mail-mcp/ source directory and
+# shipped a commit with no package main.
 /bin/
 /dist/
 /mail-mcp
@@ -21,3 +24,9 @@ coverage.*
 .vscode/
 .idea/
 .claude/
+
+# Test fixtures are source, not build output. This has to stay last so it
+# overrides everything above: several rules here are broad enough to swallow
+# a golden file, and a silently untracked fixture is exactly how the
+# entrypoint went missing. CI asserts these paths stay trackable.
+!**/testdata/**
